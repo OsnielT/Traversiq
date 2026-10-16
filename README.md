@@ -19,15 +19,17 @@ Use it as a plugin or directly through the CLI. The plugin includes a local MCP 
 
 ## Get started
 
-From a source checkout, build the plugin package:
+The download installer selects a prebuilt package for your machine and installs it through your host's plugin manager. **The first public release is pending; these download commands work after it is published.**
 
 ```sh
-python3 scripts/build-plugin.py
+curl -fL https://github.com/OsnielT/Traversiq/releases/latest/download/install.sh -o /tmp/traversiq-install.sh
+sh /tmp/traversiq-install.sh codex
+# Or: sh /tmp/traversiq-install.sh claude
 ```
 
-Building requires **Python 3.11+ and Rust**, including Cargo, Rust's build tool. Running the packaged plugin requires neither.
+Requires **macOS or Linux (ARM64 or x86-64)**, your host CLI, `curl`, `unzip`, and `shasum` or `sha256sum`. No Rust or Python needed. You can inspect the downloaded script before running it. It verifies the package checksum, stores it under `~/.local/share/traversiq` (or `$XDG_DATA_HOME/traversiq`), and registers a local marketplace. Keep that directory while the plugin is installed.
 
-The archive and its SHA-256 checksum appear in `target/plugins/`. Extract the archive and follow the [installation guide](packaging/README.md) for your host.
+For manual installation or building from source, see the [installation guide](packaging/README.md).
 
 After installation:
 
@@ -79,7 +81,7 @@ The automatic checkpoint covers project dependencies and partial JS/TS file rela
 - Analysis is static and partial. Dynamic imports, full type checking, deployed API bindings and runtime behavior are not resolved. An empty report does not establish safety.
 - Shell writes, notebook edits, MCP writers and other tool paths can bypass the checkpoint. Disabled, untrusted or failed hooks can leave edits unchecked.
 - Analysis leaves application source files unchanged. Local caches contain paths and extracted source facts, including query text; keep them private.
-- The built archive targets the machine that builds it. The macOS Apple Silicon package was tested; other platforms need separate builds. Windows packaging and release signing are not included.
+- Release builds target macOS and Linux on ARM64 and x86-64. Only macOS Apple Silicon has been checked locally; the other builds must pass CI before publication. Windows packaging and release signing are not included.
 - Claude's extracted plugin was tested with a mock model. Codex package discovery and checkpoint behavior were checked, but a full Codex plugin installation remains untested.
 
 Automatic documentation updates and contradiction detection are planned, not implemented. No measured token savings or complete impact accuracy are claimed.
@@ -92,7 +94,7 @@ cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 ```
 
-The tests use synthetic workspaces. After building the plugin, run `python3 scripts/test-plugin.py` for archive checks. The [Codex](scripts/smoke-codex-hook.py) and [Claude](scripts/smoke-claude-hook.py) smoke checks exercise host behavior with local mock responses, without paid model calls.
+The tests use synthetic workspaces. Build with `python3 scripts/build-plugin.py` (Python 3.11+ and Rust required), then run `python3 scripts/test-plugin.py` for archive checks and `python3 scripts/test-install.py` for offline installer checks. The [Codex](scripts/smoke-codex-hook.py) and [Claude](scripts/smoke-claude-hook.py) smoke checks exercise host behavior with local mock responses, without paid model calls.
 
 <details>
 <summary>Advanced configuration and analysis details</summary>

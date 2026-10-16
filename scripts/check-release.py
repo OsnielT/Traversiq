@@ -49,7 +49,8 @@ def main():
                 'examples/demo/workspace.json', 'examples/demo/local.json', 'src/main.rs', 'src/plugin.rs',
                 'plugin/plugin.json', 'plugin/.claude-plugin/plugin.json', 'plugin/mcp.json',
                 'plugin/hooks/hooks.json', 'plugin/skills/setup/SKILL.md', 'plugin/skills/impact/SKILL.md',
-                'scripts/build-plugin.py', 'packaging/README.md'}
+                'scripts/build-plugin.py', 'scripts/install.sh', 'scripts/test-install.py',
+                '.github/workflows/release.yml', 'packaging/README.md'}
     failures.extend('Missing public file: ' + path for path in sorted(required.difference(files)))
     if failures:
         raise SystemExit('\n'.join(failures))
