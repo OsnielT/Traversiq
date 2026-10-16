@@ -1,0 +1,1 @@
+{"name":"example-web","private":true,"dependencies":{"@example/ui":"file:../ui"}}

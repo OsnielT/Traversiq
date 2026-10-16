@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "projects": {
+    "web": { "depends_on": ["ui", "api"] },
+    "ui": { "depends_on": [] },
+    "api": { "depends_on": [] }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "paths": {
+    "web": "web",
+    "admin": "admin",
+    "ui": "ui",
+    "api": "api"
+  }
+}

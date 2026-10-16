@@ -1,0 +1,7 @@
+{
+  "paths": {
+    "web": "../your-web-project",
+    "ui": "../your-ui-library",
+    "api": "../your-api-project"
+  }
+}

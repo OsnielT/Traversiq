@@ -1,0 +1,6 @@
+# Merge into .codex/config.toml in the agent's working project.
+[mcp_servers.traversiq]
+command = "/absolute/path/to/traversiq/target/release/traversiq"
+args = ["mcp", "/absolute/path/to/traversiq.workspace.json", "/absolute/path/to/traversiq.local.json"]
+startup_timeout_sec = 10
+tool_timeout_sec = 60

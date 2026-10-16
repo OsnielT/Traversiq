@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "projects": {
+    "web": {
+      "depends_on": [
+        "ui",
+        "api"
+      ]
+    },
+    "admin": {
+      "depends_on": [
+        "ui"
+      ]
+    },
+    "ui": {
+      "depends_on": []
+    },
+    "api": {
+      "depends_on": []
+    }
+  }
+}

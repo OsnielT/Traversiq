@@ -1,0 +1,31 @@
+[package]
+name = "traversiq"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Local cross-project change-impact evidence for coding agents"
+repository = "https://github.com/OsnielT/Traversiq"
+readme = "README.md"
+publish = false
+# Explicitly exclude local research, application evidence, caches and host settings.
+include = [
+    "/.gitignore", "/Cargo.toml", "/Cargo.lock", "/src/**", "/tests/**", "/README.md",
+    "/LICENSE", "/NOTICE", "/PROVENANCE.md", "/THIRD_PARTY_NOTICES.md", "/licenses/upstream/**", "/licenses/inventory.json",
+    "/scripts/*.py", "/examples/demo/**/*.ts", "/examples/demo/**/*.tsx",
+    "/examples/demo/**/*.go", "/examples/demo/**/*.graphql", "/examples/demo/**/package.json",
+    "/examples/demo/workspace.json", "/examples/demo/local.json", "/examples/workspace.json", "/examples/local.example.json",
+    "/examples/codex-mcp.toml", "/examples/claude-mcp.json",
+]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tree-sitter = "0.25"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-javascript = "0.25"
+graphql-parser = "0.4.1"
+tree-sitter-go = "0.25"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+sha2 = "0.10"
+rmcp = { version = "3.5.1", default-features = false, features = ["server", "macros", "schemars", "transport-io"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }

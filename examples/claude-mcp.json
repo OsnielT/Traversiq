@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "traversiq": {
+      "type": "stdio",
+      "command": "/absolute/path/to/traversiq/target/release/traversiq",
+      "args": [
+        "mcp",
+        "/absolute/path/to/traversiq.workspace.json",
+        "/absolute/path/to/traversiq.local.json"
+      ]
+    }
+  }
+}

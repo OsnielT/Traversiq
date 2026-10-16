@@ -1,0 +1,33 @@
+/target/
+graphify.local.json
+/setup-proposal/
+/trial-results/
+*.graphify-cache.sqlite3*
+/.mcp.json
+/.codex/config.toml
+
+# Local research and application-specific evidence
+/private/
+/graphify.workspace.json
+/graphify-explained.md
+/examples/form-baseline.json
+/examples/sitemap-baseline.json
+/docs/form-trace.md
+/docs/coverage-review.md
+/docs/trial-workspace.md
+/docs/*.docx
+
+# Traversiq machine-local configuration and disposable caches
+/traversiq.local.json
+/traversiq.workspace.json
+*.traversiq-cache.sqlite3*
+
+# Local planning/docs and generated files are not part of the public repository.
+/docs/
+/DESIGN.md
+/licenses/Apache-2.0.txt
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.env.*
