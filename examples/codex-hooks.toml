@@ -1,0 +1,14 @@
+# Merge into the approved working project's .codex/config.toml.
+# Replace all three paths; build the release binary before enabling this hook.
+# Review and trust the exact hook with /hooks in Codex. No global settings required.
+[features]
+hooks = true
+
+[[hooks.PreToolUse]]
+matcher = "^apply_patch$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = '"/absolute/path/to/traversiq/target/release/traversiq" pre-edit "/absolute/path/to/workspace.json" "/absolute/path/to/local.json"'
+timeout = 10
+statusMessage = "Checking Traversiq change impact"

@@ -1027,11 +1027,15 @@ struct McpClient {
 
 impl McpClient {
     fn new(fixture: &Fixture) -> Self {
+        Self::with_args(fixture, &["mcp", "workspace.json", "local.json"])
+    }
+
+    fn with_args(fixture: &Fixture, args: &[&str]) -> Self {
         use std::io::{BufRead, BufReader};
         use std::process::Stdio;
         let mut child = Command::new(env!("CARGO_BIN_EXE_traversiq"))
             .current_dir(&fixture.0)
-            .args(["mcp", "workspace.json", "local.json"])
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -1272,4 +1276,420 @@ fn public_demo_is_self_contained_and_reports_documented_consumers() {
     assert_eq!(api["query_imports"].as_array().unwrap().len(), 1);
     assert_eq!(api["downstream_files"].as_array().unwrap().len(), 1);
     assert_eq!(api["resolver_candidates"].as_array().unwrap().len(), 2);
+}
+
+fn hook(
+    fixture: &Fixture,
+    patch: &str,
+    session: &str,
+    turn: &str,
+    call: &str,
+) -> serde_json::Value {
+    let event = serde_json::json!({"hook_event_name":"PreToolUse", "session_id":session,
+        "turn_id":turn, "tool_use_id":call, "cwd":fixture.0,
+        "tool_name":"apply_patch", "tool_input":{"command":patch}});
+    checkpoint_event(fixture, event)
+}
+
+fn checkpoint_event(fixture: &Fixture, event: serde_json::Value) -> serde_json::Value {
+    checkpoint_command(
+        fixture,
+        event,
+        &["pre-edit", "workspace.json", "local.json"],
+    )
+}
+
+fn checkpoint_command(
+    fixture: &Fixture,
+    event: serde_json::Value,
+    args: &[&str],
+) -> serde_json::Value {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_traversiq"))
+        .current_dir(&fixture.0)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(event.to_string().as_bytes())
+        .unwrap();
+    report(child.wait_with_output().unwrap())
+}
+
+const FORM_PATCH: &str = "*** Begin Patch\n*** Update File: ui/src/form.tsx\n@@\n-export function Button() { return <form/>; }\n+export function Button() { return null; }\n*** End Patch";
+
+fn denied(value: &serde_json::Value) -> bool {
+    value["hookSpecificOutput"]["permissionDecision"] == "deny"
+}
+
+#[test]
+fn checkpoint_briefs_before_an_identical_retry_and_consumes_the_receipt() {
+    let fixture = source_fixture();
+    fs::write(
+        fixture.0.join("web/src/subpath.ts"),
+        "export * from 'ui/components';",
+    )
+    .unwrap();
+    fs::write(
+        fixture.0.join("web/src/other-package.ts"),
+        "import * as Other from 'ui-extra';",
+    )
+    .unwrap();
+    let before = fs::read(fixture.0.join("ui/src/form.tsx")).unwrap();
+    let first = hook(&fixture, FORM_PATCH, "session", "turn", "one");
+    assert!(denied(&first));
+    let reason = first["hookSpecificOutput"]["permissionDecisionReason"]
+        .as_str()
+        .unwrap();
+    assert!(reason.contains("web") && reason.contains("src/page.tsx"));
+    assert!(reason.contains("partial") && reason.contains("broken.ts"));
+    assert!(reason.contains("src/subpath.ts") && !reason.contains("src/other-package.ts"));
+    assert!(
+        denied(&hook(&fixture, FORM_PATCH, "session", "turn", "one")),
+        "same invocation cannot acknowledge its own briefing"
+    );
+    let retry = hook(&fixture, FORM_PATCH, "session", "turn", "two");
+    assert!(!denied(&retry));
+    assert!(
+        retry["hookSpecificOutput"]
+            .get("permissionDecision")
+            .is_none(),
+        "never override normal authorization with allow"
+    );
+    assert!(denied(&hook(
+        &fixture, FORM_PATCH, "session", "turn", "three"
+    )));
+    assert_eq!(fs::read(fixture.0.join("ui/src/form.tsx")).unwrap(), before);
+}
+
+#[test]
+fn checkpoint_rebriefs_for_changed_bodies_proposals_sessions_turns_and_expiry() {
+    let fixture = source_fixture();
+    assert!(denied(&hook(&fixture, FORM_PATCH, "a", "a", "1")));
+    fs::write(
+        fixture.0.join("web/src/page.tsx"),
+        "// changed consumer body\nexport const page = 1;",
+    )
+    .unwrap();
+    assert!(denied(&hook(&fixture, FORM_PATCH, "a", "a", "2")));
+    assert!(denied(&hook(
+        &fixture,
+        &FORM_PATCH.replace("return null", "return false"),
+        "a",
+        "a",
+        "3"
+    )));
+    assert!(denied(&hook(&fixture, FORM_PATCH, "b", "a", "4")));
+    assert!(denied(&hook(&fixture, FORM_PATCH, "b", "b", "5")));
+    let path = fixture.0.join("local.json.traversiq-checkpoint.json");
+    let mut receipt: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    receipt["issued"] = serde_json::json!(0);
+    fs::write(&path, receipt.to_string()).unwrap();
+    assert!(denied(&hook(&fixture, FORM_PATCH, "b", "b", "6")));
+    fs::write(
+        fixture.0.join("ui/package.json"),
+        r#"{"name":"renamed-ui"}"#,
+    )
+    .unwrap();
+    assert!(denied(&hook(&fixture, FORM_PATCH, "b", "b", "7")));
+}
+
+#[test]
+fn checkpoint_handles_add_delete_move_and_rejects_unapproved_or_invalid_paths() {
+    let fixture = source_fixture();
+    let patch = "*** Begin Patch\n*** Add File: ui/src/new/added.ts\n+export const newValue = 1;\n*** Update File: ui/src/form.tsx\n*** Move to: web/src/moved.tsx\n@@\n-old\n+new\n*** Delete File: web/src/page.tsx\n*** End Patch";
+    assert!(denied(&hook(&fixture, patch, "a", "a", "1")));
+    assert!(!denied(&hook(&fixture, patch, "a", "a", "2")));
+    assert!(!fixture.0.join("ui/src/new").exists());
+    for patch in [
+        "*** Begin Patch\n*** Add File: outside.ts\n+hi\n*** End Patch",
+        "*** Begin Patch\n*** Add File: ui/../outside.ts\n+hi\n*** End Patch",
+        "*** Begin Patch\n*** Update File: ui/missing.ts\n@@\n-old\n+new\n*** End Patch",
+        "not a patch",
+    ] {
+        for call in ["3", "4"] {
+            let result = hook(&fixture, patch, "a", "a", call);
+            assert!(denied(&result));
+            assert!(result.to_string().contains("incomplete"));
+        }
+    }
+    fs::write(fixture.0.join("workspace.json"), "malformed").unwrap();
+    assert!(
+        hook(&fixture, FORM_PATCH, "a", "a", "5")
+            .to_string()
+            .contains("incomplete")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn checkpoint_rejects_symlinks_and_bounds_stuck_analysis() {
+    use std::os::unix::fs::symlink;
+    let fixture = source_fixture();
+    symlink(fixture.0.join("web/src"), fixture.0.join("ui/link")).unwrap();
+    let patch = "*** Begin Patch\n*** Add File: ui/link/new.ts\n+hi\n*** End Patch";
+    assert!(
+        hook(&fixture, patch, "a", "a", "1")
+            .to_string()
+            .contains("symlink")
+    );
+    fs::remove_file(fixture.0.join("workspace.json")).unwrap();
+    assert!(
+        Command::new("mkfifo")
+            .arg(fixture.0.join("workspace.json"))
+            .status()
+            .unwrap()
+            .success()
+    );
+    let start = std::time::Instant::now();
+    let value = hook(&fixture, FORM_PATCH, "a", "a", "2");
+    assert!(denied(&value) && value.to_string().contains("5 seconds"));
+    assert!(
+        start.elapsed().as_secs() < 10,
+        "worker must not keep the CLI alive after timeout"
+    );
+}
+
+fn claude_event(
+    fixture: &Fixture,
+    tool: &str,
+    input: serde_json::Value,
+    call: &str,
+) -> serde_json::Value {
+    serde_json::json!({"hook_event_name":"PreToolUse", "session_id":"claude-session",
+        "prompt_id":"prompt-1", "tool_use_id":call, "cwd":fixture.0,
+        "tool_name":tool, "tool_input":input})
+}
+
+#[test]
+fn claude_checkpoint_handles_edits_and_writes_without_granting_permission() {
+    let fixture = source_fixture();
+    let root = fixture.0.canonicalize().unwrap();
+    for (tool, input) in [
+        (
+            "Edit",
+            serde_json::json!({"file_path":root.join("ui/src/form.tsx"),
+            "old_string":"<form/>", "new_string":"null", "replace_all":false}),
+        ),
+        (
+            "Write",
+            serde_json::json!({"file_path":root.join("ui/src/new/value.ts"),
+            "content":"export const value = 1;"}),
+        ),
+        (
+            "Edit",
+            serde_json::json!({"file_path":root.join("ui/src/new/created.ts"),
+            "old_string":"", "new_string":"export const created = 1;"}),
+        ),
+    ] {
+        let first = checkpoint_event(&fixture, claude_event(&fixture, tool, input.clone(), "one"));
+        assert!(denied(&first));
+        let reason = first["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .unwrap();
+        assert!(reason.contains(&format!("identical {tool}")) && reason.contains("web"));
+        let retry = checkpoint_event(&fixture, claude_event(&fixture, tool, input.clone(), "two"));
+        assert!(
+            retry["hookSpecificOutput"]
+                .get("permissionDecision")
+                .is_none()
+        );
+        assert!(denied(&checkpoint_event(
+            &fixture,
+            claude_event(&fixture, tool, input, "three")
+        )));
+    }
+    assert!(!root.join("ui/src/new").exists());
+    assert!(
+        fs::read_to_string(root.join("ui/src/form.tsx"))
+            .unwrap()
+            .contains("<form/>")
+    );
+}
+
+#[test]
+fn claude_receipts_are_scoped_to_exact_inputs_prompts_and_agents() {
+    let fixture = source_fixture();
+    let root = fixture.0.canonicalize().unwrap();
+    let input = serde_json::json!({"file_path":root.join("ui/src/form.tsx"),
+        "old_string":"<form/>", "new_string":"null", "replace_all":false});
+    let initial = claude_event(&fixture, "Edit", input.clone(), "one");
+    assert!(denied(&checkpoint_event(&fixture, initial.clone())));
+    let mut changed = initial.clone();
+    changed["tool_use_id"] = serde_json::json!("two");
+    changed["tool_input"]["replace_all"] = serde_json::json!(true);
+    assert!(denied(&checkpoint_event(&fixture, changed.clone())));
+    changed["tool_use_id"] = serde_json::json!("three");
+    changed["prompt_id"] = serde_json::json!("prompt-2");
+    assert!(denied(&checkpoint_event(&fixture, changed.clone())));
+    changed["tool_use_id"] = serde_json::json!("four");
+    changed["agent_id"] = serde_json::json!("agent-1");
+    assert!(denied(&checkpoint_event(&fixture, changed.clone())));
+    changed["tool_use_id"] = serde_json::json!("five");
+    assert!(!denied(&checkpoint_event(&fixture, changed)));
+    let write =
+        serde_json::json!({"file_path":root.join("ui/src/form.tsx"), "content":"replacement"});
+    assert!(denied(&checkpoint_event(
+        &fixture,
+        claude_event(&fixture, "Write", write.clone(), "six")
+    )));
+    fs::write(root.join("ui/src/form.tsx"), "export const changed = 1;").unwrap();
+    assert!(denied(&checkpoint_event(
+        &fixture,
+        claude_event(&fixture, "Write", write, "seven")
+    )));
+}
+
+#[test]
+fn claude_checkpoint_rejects_missing_scope_malformed_inputs_and_unapproved_paths() {
+    let fixture = source_fixture();
+    let root = fixture.0.canonicalize().unwrap();
+    let input = serde_json::json!({"file_path":root.join("ui/src/form.tsx"),
+        "old_string":"<form/>", "new_string":"null"});
+    let mut missing_scope = claude_event(&fixture, "Edit", input, "one");
+    missing_scope.as_object_mut().unwrap().remove("prompt_id");
+    let result = checkpoint_event(&fixture, missing_scope);
+    assert!(denied(&result) && result.to_string().contains("Claude prompt_id"));
+    for (tool, input) in [
+        (
+            "Edit",
+            serde_json::json!({"file_path":root.join("ui/src/form.tsx"), "old_string":1,"new_string":"null"}),
+        ),
+        (
+            "Edit",
+            serde_json::json!({"file_path":root.join("ui/src/form.tsx"), "old_string":"x","new_string":"y","replace_all":"yes"}),
+        ),
+        (
+            "Write",
+            serde_json::json!({"file_path":root.join("ui/src/form.tsx")}),
+        ),
+        (
+            "Write",
+            serde_json::json!({"file_path":"ui/new.ts", "content":"x"}),
+        ),
+        (
+            "Write",
+            serde_json::json!({"file_path":root.join("outside.ts"), "content":"x"}),
+        ),
+        (
+            "NotebookEdit",
+            serde_json::json!({"notebook_path":root.join("ui/book.ipynb")}),
+        ),
+    ] {
+        let result = checkpoint_event(&fixture, claude_event(&fixture, tool, input, "two"));
+        assert!(denied(&result) && result.to_string().contains("incomplete"));
+    }
+}
+
+fn configure_plugin(fixture: &Fixture) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_traversiq"))
+        .current_dir(&fixture.0)
+        .args(["plugin", "configure", "workspace.json", "local.json"])
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn plugin_setup_validates_without_overwriting_and_starts_the_shared_mcp() {
+    let fixture = source_fixture();
+    let configured = report(configure_plugin(&fixture));
+    assert_eq!(configured["project_count"], 2);
+    let path = fixture.0.join(".traversiq/config.json");
+    let before = fs::read(&path).unwrap();
+    let pointer: serde_json::Value = serde_json::from_slice(&before).unwrap();
+    assert_eq!(
+        pointer["workspace"],
+        fixture
+            .0
+            .join("workspace.json")
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+    );
+    assert!(!configure_plugin(&fixture).status.success());
+    assert_eq!(fs::read(&path).unwrap(), before);
+    let mut client = McpClient::with_args(&fixture, &["plugin", "mcp"]);
+    let workspace = client.successful("traversiq_workspace", serde_json::json!({}));
+    assert!(workspace["projects"]["ui"].is_object());
+    let broken = Fixture::new();
+    fs::write(broken.0.join("local.json"), "invalid").unwrap();
+    assert!(!configure_plugin(&broken).status.success());
+    assert!(!broken.0.join(".traversiq").exists());
+}
+
+#[test]
+fn plugin_hooks_route_by_event_cwd_and_reject_a_broken_nearer_pointer() {
+    let fixture = source_fixture();
+    let input = serde_json::json!({"file_path":fixture.0.canonicalize().unwrap().join("ui/src/form.tsx"),
+        "old_string":"<form/>", "new_string":"null"});
+    let mut event = claude_event(&fixture, "Edit", input, "one");
+    event["cwd"] = serde_json::json!(fixture.0.join("ui/src"));
+    let unchecked = checkpoint_command(&fixture, event.clone(), &["plugin", "pre-edit"]);
+    assert!(!denied(&unchecked) && unchecked.to_string().contains("unchecked"));
+    let unconfigured_mcp = Command::new(env!("CARGO_BIN_EXE_traversiq"))
+        .current_dir(&fixture.0)
+        .args(["plugin", "mcp"])
+        .output()
+        .unwrap();
+    assert!(!unconfigured_mcp.status.success() && unconfigured_mcp.stdout.is_empty());
+    assert!(configure_plugin(&fixture).status.success());
+    let first = checkpoint_command(&fixture, event.clone(), &["plugin", "pre-edit"]);
+    assert!(denied(&first) && first.to_string().contains("src/page.tsx"));
+    event["tool_use_id"] = serde_json::json!("two");
+    assert!(!denied(&checkpoint_command(
+        &fixture,
+        event.clone(),
+        &["plugin", "pre-edit"]
+    )));
+    let nearer = fixture.0.join("ui/.traversiq");
+    fs::create_dir_all(&nearer).unwrap();
+    fs::write(nearer.join("config.json"), "invalid pointer").unwrap();
+    let failure = checkpoint_command(&fixture, event.clone(), &["plugin", "pre-edit"]);
+    assert!(denied(&failure) && failure.to_string().contains("incomplete"));
+    fs::write(
+        nearer.join("config.json"),
+        r#"{"workspace":"../../workspace.json","local":"../../local.json"}"#,
+    )
+    .unwrap();
+    let settings = traversiq::plugin::settings(&fixture.0.join("ui/src"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        settings.workspace.canonicalize().unwrap(),
+        fixture.0.join("workspace.json").canonicalize().unwrap()
+    );
+    assert!(denied(&checkpoint_command(
+        &fixture,
+        event,
+        &["plugin", "pre-edit"]
+    )));
+}
+
+#[cfg(unix)]
+#[test]
+fn plugin_setup_does_not_write_through_a_symlink_configuration_directory() {
+    use std::os::unix::fs::symlink;
+    let fixture = Fixture::new();
+    let other = Fixture::new();
+    symlink(&other.0, fixture.0.join(".traversiq")).unwrap();
+    assert!(!configure_plugin(&fixture).status.success());
+    assert!(!other.0.join("config.json").exists());
+    fs::write(
+        other.0.join("config.json"),
+        r#"{"workspace":"workspace.json","local":"local.json"}"#,
+    )
+    .unwrap();
+    assert!(
+        traversiq::plugin::settings(&fixture.0)
+            .unwrap_err()
+            .contains("symlink")
+    );
 }

@@ -31,3 +31,8 @@ __pycache__/
 .DS_Store
 .env
 .env.*
+
+*.traversiq-checkpoint.json*
+
+# Workspace-local plugin pointers contain machine-specific paths.
+/.traversiq/

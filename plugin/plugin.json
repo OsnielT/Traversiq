@@ -1,0 +1,16 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "traversiq",
+  "version": "0.1.0",
+  "description": "Local cross-project change-impact evidence and pre-edit checkpoints.",
+  "extensions": {
+    "com.openai": {
+      "hooks": "./hooks/hooks.json",
+      "interface": {
+        "displayName": "Traversiq",
+        "shortDescription": "Understand a change's ripple effect",
+        "developerName": "Osniel Torres"
+      }
+    }
+  }
+}

@@ -11,10 +11,11 @@ publish = false
 include = [
     "/.gitignore", "/Cargo.toml", "/Cargo.lock", "/src/**", "/tests/**", "/README.md",
     "/LICENSE", "/NOTICE", "/PROVENANCE.md", "/THIRD_PARTY_NOTICES.md", "/licenses/upstream/**", "/licenses/inventory.json",
-    "/scripts/*.py", "/examples/demo/**/*.ts", "/examples/demo/**/*.tsx",
+    "/plugin/plugin.json", "/plugin/.claude-plugin/plugin.json", "/plugin/mcp.json",
+    "/plugin/hooks/*.json", "/plugin/skills/*/SKILL.md", "/packaging/*.json", "/packaging/*.md", "/scripts/*.py", "/examples/demo/**/*.ts", "/examples/demo/**/*.tsx",
     "/examples/demo/**/*.go", "/examples/demo/**/*.graphql", "/examples/demo/**/package.json",
     "/examples/demo/workspace.json", "/examples/demo/local.json", "/examples/workspace.json", "/examples/local.example.json",
-    "/examples/codex-mcp.toml", "/examples/claude-mcp.json",
+    "/examples/claude-hooks.json", "/examples/codex-hooks.toml", "/examples/codex-mcp.toml", "/examples/claude-mcp.json",
 ]
 
 [dependencies]

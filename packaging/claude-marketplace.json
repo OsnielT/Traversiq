@@ -1,0 +1,14 @@
+{
+  "name": "traversiq-local",
+  "owner": {
+    "name": "Osniel Torres"
+  },
+  "plugins": [
+    {
+      "name": "traversiq",
+      "source": "./plugins/traversiq",
+      "description": "Local cross-project change-impact evidence."
+    }
+  ],
+  "description": "Traversiq local change-impact tools and pre-edit checkpoints."
+}

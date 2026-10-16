@@ -46,7 +46,10 @@ def main():
         if issues:
             failures.append(f'{path}: {", ".join(issues)}')
     required = {'LICENSE', 'README.md', 'NOTICE', 'PROVENANCE.md', 'THIRD_PARTY_NOTICES.md', 'licenses/inventory.json',
-                'examples/demo/workspace.json', 'examples/demo/local.json', 'src/main.rs'}
+                'examples/demo/workspace.json', 'examples/demo/local.json', 'src/main.rs', 'src/plugin.rs',
+                'plugin/plugin.json', 'plugin/.claude-plugin/plugin.json', 'plugin/mcp.json',
+                'plugin/hooks/hooks.json', 'plugin/skills/setup/SKILL.md', 'plugin/skills/impact/SKILL.md',
+                'scripts/build-plugin.py', 'packaging/README.md'}
     failures.extend('Missing public file: ' + path for path in sorted(required.difference(files)))
     if failures:
         raise SystemExit('\n'.join(failures))

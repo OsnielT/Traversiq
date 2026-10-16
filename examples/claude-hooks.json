@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Edit|Write)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/absolute/path/to/traversiq/target/release/traversiq\" pre-edit \"/absolute/path/to/workspace.json\" \"/absolute/path/to/local.json\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

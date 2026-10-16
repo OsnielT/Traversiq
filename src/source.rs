@@ -679,6 +679,35 @@ pub(crate) fn index_sources(
     Ok((index, cache.finish()?))
 }
 
+// Package identity is only a candidate; callers must not imply an installed binding.
+pub(crate) fn package_importers(
+    index: &SourceIndex,
+    provider: &str,
+    package: &str,
+) -> Vec<(PathBuf, Location)> {
+    index
+        .iter()
+        .filter(|(_, module)| module.location.project != provider)
+        .flat_map(|(path, module)| {
+            module
+                .links
+                .iter()
+                .filter(|link| {
+                    link.source == package || link.source.starts_with(&format!("{package}/"))
+                })
+                .map(move |link| {
+                    (
+                        path.clone(),
+                        Location {
+                            line: link.line,
+                            ..module.location.clone()
+                        },
+                    )
+                })
+        })
+        .collect()
+}
+
 pub(crate) fn module_graph(
     index: &SourceIndex,
     roots: &BTreeMap<String, PathBuf>,

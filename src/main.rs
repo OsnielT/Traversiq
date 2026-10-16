@@ -3,19 +3,41 @@ use std::path::Path;
 use std::process::ExitCode;
 use traversiq::{api::trace_api, discovery::discover, load_workspace, source::trace};
 
-const USAGE: &str = "Usage:\n  traversiq mcp <workspace.json> <local.json>\n  traversiq api-trace <workspace.json> <local.json> <provider-id> <schema-entry> <Type.field.path> [--all-warnings]\n  traversiq trace <workspace.json> <local.json> <provider-id> <source-entry> <symbol> [--all-warnings]\n  traversiq discover <projects-directory>\n  traversiq validate <workspace.json> <local.json>\n  traversiq impact <workspace.json> <local.json> <project-id>\n\nImpact reports declared project dependencies. Trace reports a partial JS/TS import graph. Agent hooks are not implemented.";
+const USAGE: &str = "Usage:\n  traversiq plugin configure <workspace.json> <local.json>\n  traversiq plugin mcp\n  traversiq plugin pre-edit\n  traversiq pre-edit <workspace.json> <local.json>\n  traversiq mcp <workspace.json> <local.json>\n  traversiq api-trace <workspace.json> <local.json> <provider-id> <schema-entry> <Type.field.path> [--all-warnings]\n  traversiq trace <workspace.json> <local.json> <provider-id> <source-entry> <symbol> [--all-warnings]\n  traversiq discover <projects-directory>\n  traversiq validate <workspace.json> <local.json>\n  traversiq impact <workspace.json> <local.json> <project-id>\n\nImpact reports declared project dependencies. Trace reports a partial JS/TS import graph. Pre-edit supports Codex apply_patch and Claude Edit/Write checkpoints with partial coverage.";
 
 fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("plugin") {
+        match (args.get(1).map(String::as_str), args.len()) {
+            (Some("configure"), 4) => println!(
+                "{}",
+                traversiq::plugin::configure(
+                    &std::env::current_dir().map_err(|e| e.to_string())?,
+                    Path::new(&args[2]),
+                    Path::new(&args[3])
+                )?
+            ),
+            (Some("pre-edit"), 2) => println!("{}", traversiq::plugin::pre_edit()),
+            (Some("mcp"), 2) => {
+                let settings = traversiq::plugin::settings(
+                    &std::env::current_dir().map_err(|e| e.to_string())?,
+                )?
+                .ok_or("Traversiq is not configured here; run the Traversiq setup skill first")?;
+                return serve(&settings.workspace, &settings.local);
+            }
+            _ => return Err(USAGE.into()),
+        }
+        return Ok(());
+    }
+    if args.first().map(String::as_str) == Some("pre-edit") && args.len() == 3 {
+        println!(
+            "{}",
+            traversiq::checkpoint::run(Path::new(&args[1]), Path::new(&args[2]))
+        );
+        return Ok(());
+    }
     if args.first().map(String::as_str) == Some("mcp") && args.len() == 3 {
-        return tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| e.to_string())?
-            .block_on(traversiq::mcp::serve(
-                Path::new(&args[1]),
-                Path::new(&args[2]),
-            ));
+        return serve(Path::new(&args[1]), Path::new(&args[2]));
     }
     if args.len() == 1 && matches!(args[0].as_str(), "--help" | "-h") {
         println!("{USAGE}");
@@ -82,6 +104,14 @@ fn run() -> Result<(), String> {
         serde_json::to_string_pretty(&output).map_err(|error| error.to_string())?
     );
     Ok(())
+}
+
+fn serve(config: &Path, local: &Path) -> Result<(), String> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?
+        .block_on(traversiq::mcp::serve(config, local))
 }
 
 fn main() -> ExitCode {

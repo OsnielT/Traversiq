@@ -1,0 +1,8 @@
+{
+  "name": "traversiq",
+  "version": "0.1.0",
+  "description": "Local cross-project change-impact evidence and pre-edit checkpoints.",
+  "author": {"name": "Osniel Torres"},
+  "license": "Apache-2.0",
+  "mcpServers": "./mcp.json"
+}

@@ -1,7 +1,9 @@
 pub mod api;
 mod cache;
+pub mod checkpoint;
 pub mod discovery;
 pub mod mcp;
+pub mod plugin;
 pub mod source;
 
 use serde::{Deserialize, Serialize};
