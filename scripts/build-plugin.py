@@ -40,6 +40,10 @@ def build(root, binary=None):
         flags.extend([f'--remap-path-prefix={Path.home()}=/source/home',
                       f'--remap-path-prefix={root}=/source/traversiq'])
         env['CARGO_ENCODED_RUSTFLAGS'] = '\x1f'.join(flags)
+        # C dependencies embed __FILE__ in assert messages (glibc), so remap them too.
+        env['CFLAGS'] = ' '.join(filter(None, [
+            env.get('CFLAGS'), f'-ffile-prefix-map={Path.home()}=/source/home',
+            f'-ffile-prefix-map={root}=/source/traversiq']))
         build_dir = root / 'target/plugin-build'
         subprocess.run([str(cargo), 'build', '--locked', '--release', '--target', target,
                         '--target-dir', str(build_dir)], cwd=root, env=env, check=True)
