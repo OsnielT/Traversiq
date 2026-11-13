@@ -100,8 +100,9 @@ pub fn pre_edit() -> Value {
                 &settings.local,
                 input,
             )),
-            None => Ok(json!({"hookSpecificOutput": {"hookEventName":"PreToolUse",
-                "additionalContext":"Traversiq is not configured for this directory; change impact is unchecked. Use the Traversiq setup skill to confirm project mappings and create .traversiq/config.json. Normal host permissions still apply."}})),
+            None => Ok(checkpoint::note(
+                "not configured for this directory; change impact is unchecked. Use the Traversiq setup skill to confirm project mappings and create .traversiq/config.json.",
+            )),
         }
     })();
     result.unwrap_or_else(checkpoint::incomplete)

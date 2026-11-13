@@ -627,7 +627,7 @@ pub fn trace_api(
         omitted_warnings,
         limitations: vec![
             "Schema-field matches are cross-project candidates; no endpoint configuration is read, and no deployed API dependency is established.",
-            "Only static gql-tagged templates in configured src directories are considered; tag bindings/shadowing are not resolved. Interpolation and JavaScript escapes are skipped, not executed.",
+            "Only static gql-tagged templates in indexed JS/TS files are considered; tag bindings/shadowing are not resolved. Interpolation and JavaScript escapes are skipped, not executed.",
             "Same-document fragments and aliases are followed. Conditional directives, interface/union refinements and cross-document fragments are not resolved; this is not full GraphQL validation.",
             "Go methods are matched by field/method names and one hop of selector-call names; receiver types, package identity, runtime schema binding and deeper call chains remain unverified.",
             "Named query bindings are followed through local ESM exports/imports before expanding file candidates. Namespace query imports are not resolved. Downstream files are not proven value flow or breakages. Go test files are excluded from resolver candidates.",

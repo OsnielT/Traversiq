@@ -347,6 +347,50 @@ fn source_trace_follows_export_aliases_and_downstream_file_imports() {
 }
 
 #[test]
+fn trace_covers_base_url_subpath_imports_and_projects_without_src() {
+    let fixture = source_fixture();
+    // extends no longer discards local aliases; baseUrl anchors paths and bare specifiers.
+    fs::write(
+        fixture.0.join("web/tsconfig.json"),
+        r#"{"extends":"./base.json","compilerOptions":{"baseUrl":"src","paths":{"@/*":["*"]}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        fixture.0.join("web/src/bare.ts"),
+        "import { Wrapper } from 'barrel';",
+    )
+    .unwrap();
+    fs::write(
+        fixture.0.join("web/src/deep.ts"),
+        "import { Form } from 'ui/components';",
+    )
+    .unwrap();
+    // A project with no src directory is indexed from its root.
+    fs::create_dir_all(fixture.0.join("flat/app")).unwrap();
+    fs::write(
+        fixture.0.join("flat/app/page.tsx"),
+        "import { Form } from 'ui';",
+    )
+    .unwrap();
+    fs::write(
+        fixture.0.join("workspace.json"),
+        r#"{"version":1,"projects":{"ui":{"depends_on":[]},"web":{"depends_on":["ui"]},"flat":{"depends_on":["ui"]}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        fixture.0.join("local.json"),
+        r#"{"paths":{"ui":"ui","web":"web","flat":"flat"}}"#,
+    )
+    .unwrap();
+    let report = report(run_trace(&fixture, "src/index.ts", "Form"));
+    let direct = report["direct_references"].to_string();
+    assert!(direct.contains("app/page.tsx") && direct.contains("subpath_import_candidate"));
+    let downstream = report["downstream_files"].to_string();
+    assert!(downstream.contains("src/page.tsx") && downstream.contains("src/bare.ts"));
+    assert!(report["warnings"].to_string().contains("extends"));
+}
+
+#[test]
 fn source_trace_rejects_ambiguous_missing_and_out_of_root_exports() {
     let fixture = source_fixture();
     fs::write(fixture.0.join("ui/src/other.ts"), "export const Form = 1;").unwrap();
@@ -1330,7 +1374,7 @@ fn denied(value: &serde_json::Value) -> bool {
 }
 
 #[test]
-fn checkpoint_briefs_before_an_identical_retry_and_consumes_the_receipt() {
+fn checkpoint_briefs_once_then_lets_unchanged_evidence_proceed() {
     let fixture = source_fixture();
     fs::write(
         fixture.0.join("web/src/subpath.ts"),
@@ -1363,35 +1407,49 @@ fn checkpoint_briefs_before_an_identical_retry_and_consumes_the_receipt() {
             .is_none(),
         "never override normal authorization with allow"
     );
-    assert!(denied(&hook(
-        &fixture, FORM_PATCH, "session", "turn", "three"
-    )));
+    assert!(
+        !denied(&hook(
+            &fixture,
+            &FORM_PATCH.replace("return null", "return false"),
+            "session",
+            "turn",
+            "three"
+        )),
+        "an adjusted edit with the same evidence needs no second briefing"
+    );
     assert_eq!(fs::read(fixture.0.join("ui/src/form.tsx")).unwrap(), before);
 }
 
 #[test]
-fn checkpoint_rebriefs_for_changed_bodies_proposals_sessions_turns_and_expiry() {
+fn checkpoint_rebriefs_for_changed_evidence_sessions_turns_and_expiry() {
     let fixture = source_fixture();
     assert!(denied(&hook(&fixture, FORM_PATCH, "a", "a", "1")));
     fs::write(
         fixture.0.join("web/src/page.tsx"),
-        "// changed consumer body\nexport const page = 1;",
+        "// consumer no longer imports the barrel\nexport const page = 1;",
     )
     .unwrap();
     assert!(denied(&hook(&fixture, FORM_PATCH, "a", "a", "2")));
-    assert!(denied(&hook(
-        &fixture,
-        &FORM_PATCH.replace("return null", "return false"),
-        "a",
-        "a",
-        "3"
-    )));
     assert!(denied(&hook(&fixture, FORM_PATCH, "b", "a", "4")));
     assert!(denied(&hook(&fixture, FORM_PATCH, "b", "b", "5")));
-    let path = fixture.0.join("local.json.traversiq-checkpoint.json");
-    let mut receipt: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-    receipt["issued"] = serde_json::json!(0);
-    fs::write(&path, receipt.to_string()).unwrap();
+    let mut receipts = 0;
+    for entry in fs::read_dir(&fixture.0).unwrap().flatten() {
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("local.json.traversiq-checkpoint.json.")
+        {
+            continue;
+        }
+        fs::File::options()
+            .write(true)
+            .open(entry.path())
+            .unwrap()
+            .set_modified(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap();
+        receipts += 1;
+    }
+    assert_eq!(receipts, 4, "one receipt per briefed evidence and scope");
     assert!(denied(&hook(&fixture, FORM_PATCH, "b", "b", "6")));
     fs::write(
         fixture.0.join("ui/package.json"),
@@ -1402,44 +1460,78 @@ fn checkpoint_rebriefs_for_changed_bodies_proposals_sessions_turns_and_expiry() 
 }
 
 #[test]
-fn checkpoint_handles_add_delete_move_and_rejects_unapproved_or_invalid_paths() {
+fn checkpoint_handles_add_delete_move_and_never_blocks_on_outside_or_invalid_paths() {
     let fixture = source_fixture();
     let patch = "*** Begin Patch\n*** Add File: ui/src/new/added.ts\n+export const newValue = 1;\n*** Update File: ui/src/form.tsx\n*** Move to: web/src/moved.tsx\n@@\n-old\n+new\n*** Delete File: web/src/page.tsx\n*** End Patch";
     assert!(denied(&hook(&fixture, patch, "a", "a", "1")));
     assert!(!denied(&hook(&fixture, patch, "a", "a", "2")));
     assert!(!fixture.0.join("ui/src/new").exists());
+    // Targets outside every project pass unchecked, without a receipt or a retry.
+    for path in ["outside.ts", "ui/../outside.ts"] {
+        let outside = hook(
+            &fixture,
+            &format!("*** Begin Patch\n*** Add File: {path}\n+hi\n*** End Patch"),
+            "a",
+            "a",
+            "o1",
+        );
+        assert!(!denied(&outside) && outside.to_string().contains("not checked"));
+    }
+    let mixed = "*** Begin Patch\n*** Add File: outside.ts\n+hi\n*** Update File: ui/src/form.tsx\n@@\n-old\n+new\n*** End Patch";
+    let briefing = hook(&fixture, mixed, "a", "a", "m1");
+    assert!(
+        denied(&briefing)
+            && briefing
+                .to_string()
+                .contains("outside the configured projects")
+    );
+    assert!(!denied(&hook(&fixture, mixed, "a", "a", "m2")));
+    // Failures are reported as unchecked edits; they never block or deadlock the agent.
     for patch in [
-        "*** Begin Patch\n*** Add File: outside.ts\n+hi\n*** End Patch",
-        "*** Begin Patch\n*** Add File: ui/../outside.ts\n+hi\n*** End Patch",
         "*** Begin Patch\n*** Update File: ui/missing.ts\n@@\n-old\n+new\n*** End Patch",
+        "*** Begin Patch\n*** Add File: ui/absent/../new.ts\n+hi\n*** End Patch",
         "not a patch",
     ] {
-        for call in ["3", "4"] {
-            let result = hook(&fixture, patch, "a", "a", call);
-            assert!(denied(&result));
-            assert!(result.to_string().contains("incomplete"));
-        }
+        let result = hook(&fixture, patch, "a", "a", "3");
+        assert!(!denied(&result) && result.to_string().contains("incomplete"));
     }
     fs::write(fixture.0.join("workspace.json"), "malformed").unwrap();
-    assert!(
-        hook(&fixture, FORM_PATCH, "a", "a", "5")
-            .to_string()
-            .contains("incomplete")
-    );
+    let broken = hook(&fixture, FORM_PATCH, "a", "a", "5");
+    assert!(!denied(&broken) && broken.to_string().contains("incomplete"));
 }
 
 #[cfg(unix)]
 #[test]
-fn checkpoint_rejects_symlinks_and_bounds_stuck_analysis() {
+fn checkpoint_resolves_symlinks_and_bounds_stuck_analysis() {
     use std::os::unix::fs::symlink;
     let fixture = source_fixture();
+    // Links are resolved, so evidence is attributed to the project actually written.
     symlink(fixture.0.join("web/src"), fixture.0.join("ui/link")).unwrap();
-    let patch = "*** Begin Patch\n*** Add File: ui/link/new.ts\n+hi\n*** End Patch";
-    assert!(
-        hook(&fixture, patch, "a", "a", "1")
-            .to_string()
-            .contains("symlink")
-    );
+    symlink(fixture.0.join("ui/src"), fixture.0.join("sneak")).unwrap();
+    fs::create_dir(fixture.0.join("elsewhere")).unwrap();
+    symlink(fixture.0.join("elsewhere"), fixture.0.join("alias")).unwrap();
+    let add = |path: &str, call: &str| {
+        hook(
+            &fixture,
+            &format!("*** Begin Patch\n*** Add File: {path}\n+hi\n*** End Patch"),
+            "a",
+            "a",
+            call,
+        )
+    };
+    for (path, owner) in [("ui/link/new.ts", "web"), ("sneak/new.ts", "ui")] {
+        let briefing = add(path, "s1");
+        let reason = briefing["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .unwrap();
+        assert!(reason.contains(&format!(
+            r#""touched":[{{"path":"src/new.ts","project":"{owner}"}}]"#
+        )));
+    }
+    assert!(!denied(&add("alias/notes.md", "s2")));
+    symlink(fixture.0.join("missing"), fixture.0.join("ui/dangling")).unwrap();
+    let dangling = add("ui/dangling", "s3");
+    assert!(!denied(&dangling) && dangling.to_string().contains("incomplete"));
     fs::remove_file(fixture.0.join("workspace.json")).unwrap();
     assert!(
         Command::new("mkfifo")
@@ -1450,7 +1542,7 @@ fn checkpoint_rejects_symlinks_and_bounds_stuck_analysis() {
     );
     let start = std::time::Instant::now();
     let value = hook(&fixture, FORM_PATCH, "a", "a", "2");
-    assert!(denied(&value) && value.to_string().contains("5 seconds"));
+    assert!(!denied(&value) && value.to_string().contains("5 seconds"));
     assert!(
         start.elapsed().as_secs() < 10,
         "worker must not keep the CLI alive after timeout"
@@ -1494,17 +1586,13 @@ fn claude_checkpoint_handles_edits_and_writes_without_granting_permission() {
         let reason = first["hookSpecificOutput"]["permissionDecisionReason"]
             .as_str()
             .unwrap();
-        assert!(reason.contains(&format!("identical {tool}")) && reason.contains("web"));
-        let retry = checkpoint_event(&fixture, claude_event(&fixture, tool, input.clone(), "two"));
+        assert!(reason.contains("pre-edit briefing") && reason.contains("web"));
+        let retry = checkpoint_event(&fixture, claude_event(&fixture, tool, input, "two"));
         assert!(
             retry["hookSpecificOutput"]
                 .get("permissionDecision")
                 .is_none()
         );
-        assert!(denied(&checkpoint_event(
-            &fixture,
-            claude_event(&fixture, tool, input, "three")
-        )));
     }
     assert!(!root.join("ui/src/new").exists());
     assert!(
@@ -1515,7 +1603,7 @@ fn claude_checkpoint_handles_edits_and_writes_without_granting_permission() {
 }
 
 #[test]
-fn claude_receipts_are_scoped_to_exact_inputs_prompts_and_agents() {
+fn claude_receipts_are_scoped_to_evidence_prompts_and_agents() {
     let fixture = source_fixture();
     let root = fixture.0.canonicalize().unwrap();
     let input = serde_json::json!({"file_path":root.join("ui/src/form.tsx"),
@@ -1525,7 +1613,7 @@ fn claude_receipts_are_scoped_to_exact_inputs_prompts_and_agents() {
     let mut changed = initial.clone();
     changed["tool_use_id"] = serde_json::json!("two");
     changed["tool_input"]["replace_all"] = serde_json::json!(true);
-    assert!(denied(&checkpoint_event(&fixture, changed.clone())));
+    assert!(!denied(&checkpoint_event(&fixture, changed.clone())));
     changed["tool_use_id"] = serde_json::json!("three");
     changed["prompt_id"] = serde_json::json!("prompt-2");
     assert!(denied(&checkpoint_event(&fixture, changed.clone())));
@@ -1536,11 +1624,12 @@ fn claude_receipts_are_scoped_to_exact_inputs_prompts_and_agents() {
     assert!(!denied(&checkpoint_event(&fixture, changed)));
     let write =
         serde_json::json!({"file_path":root.join("ui/src/form.tsx"), "content":"replacement"});
-    assert!(denied(&checkpoint_event(
+    // A different tool on the same file has the same evidence; a new consumer does not.
+    assert!(!denied(&checkpoint_event(
         &fixture,
         claude_event(&fixture, "Write", write.clone(), "six")
     )));
-    fs::write(root.join("ui/src/form.tsx"), "export const changed = 1;").unwrap();
+    fs::write(root.join("web/src/more.ts"), "import { Form } from 'ui';").unwrap();
     assert!(denied(&checkpoint_event(
         &fixture,
         claude_event(&fixture, "Write", write, "seven")
@@ -1548,15 +1637,17 @@ fn claude_receipts_are_scoped_to_exact_inputs_prompts_and_agents() {
 }
 
 #[test]
-fn claude_checkpoint_rejects_missing_scope_malformed_inputs_and_unapproved_paths() {
+fn claude_checkpoint_tolerates_a_missing_scope_and_never_blocks_on_malformed_inputs() {
     let fixture = source_fixture();
     let root = fixture.0.canonicalize().unwrap();
     let input = serde_json::json!({"file_path":root.join("ui/src/form.tsx"),
         "old_string":"<form/>", "new_string":"null"});
     let mut missing_scope = claude_event(&fixture, "Edit", input, "one");
     missing_scope.as_object_mut().unwrap().remove("prompt_id");
-    let result = checkpoint_event(&fixture, missing_scope);
-    assert!(denied(&result) && result.to_string().contains("Claude prompt_id"));
+    let result = checkpoint_event(&fixture, missing_scope.clone());
+    assert!(denied(&result) && result.to_string().contains("pre-edit briefing"));
+    missing_scope["tool_use_id"] = serde_json::json!("retry");
+    assert!(!denied(&checkpoint_event(&fixture, missing_scope)));
     for (tool, input) in [
         (
             "Edit",
@@ -1575,17 +1666,38 @@ fn claude_checkpoint_rejects_missing_scope_malformed_inputs_and_unapproved_paths
             serde_json::json!({"file_path":"ui/new.ts", "content":"x"}),
         ),
         (
-            "Write",
-            serde_json::json!({"file_path":root.join("outside.ts"), "content":"x"}),
-        ),
-        (
             "NotebookEdit",
             serde_json::json!({"notebook_path":root.join("ui/book.ipynb")}),
         ),
     ] {
         let result = checkpoint_event(&fixture, claude_event(&fixture, tool, input, "two"));
-        assert!(denied(&result) && result.to_string().contains("incomplete"));
+        assert!(!denied(&result) && result.to_string().contains("incomplete"));
     }
+    let outside = serde_json::json!({"file_path":root.join("outside.ts"), "content":"x"});
+    let result = checkpoint_event(&fixture, claude_event(&fixture, "Write", outside, "three"));
+    assert!(!denied(&result) && result.to_string().contains("not checked"));
+}
+
+#[test]
+fn interleaved_proposals_keep_separate_receipts() {
+    let fixture = source_fixture();
+    let root = fixture.0.canonicalize().unwrap();
+    let a = serde_json::json!({"file_path":root.join("ui/src/form.tsx"), "content":"a"});
+    let b = serde_json::json!({"file_path":root.join("web/src/page.tsx"), "content":"b"});
+    let attempt = |input: &serde_json::Value, call: &str| {
+        checkpoint_event(
+            &fixture,
+            claude_event(&fixture, "Write", input.clone(), call),
+        )
+    };
+    assert!(denied(&attempt(&a, "a1")));
+    assert!(denied(&attempt(&b, "b1")));
+    assert!(!denied(&attempt(&a, "a2")));
+    assert!(!denied(&attempt(&b, "b2")));
+    assert!(
+        !denied(&attempt(&a, "a3")),
+        "unchanged evidence is briefed once"
+    );
 }
 
 fn configure_plugin(fixture: &Fixture) -> Output {
@@ -1626,7 +1738,7 @@ fn plugin_setup_validates_without_overwriting_and_starts_the_shared_mcp() {
 }
 
 #[test]
-fn plugin_hooks_route_by_event_cwd_and_reject_a_broken_nearer_pointer() {
+fn plugin_hooks_route_by_event_cwd_and_report_a_broken_nearer_pointer() {
     let fixture = source_fixture();
     let input = serde_json::json!({"file_path":fixture.0.canonicalize().unwrap().join("ui/src/form.tsx"),
         "old_string":"<form/>", "new_string":"null"});
@@ -1653,7 +1765,7 @@ fn plugin_hooks_route_by_event_cwd_and_reject_a_broken_nearer_pointer() {
     fs::create_dir_all(&nearer).unwrap();
     fs::write(nearer.join("config.json"), "invalid pointer").unwrap();
     let failure = checkpoint_command(&fixture, event.clone(), &["plugin", "pre-edit"]);
-    assert!(denied(&failure) && failure.to_string().contains("incomplete"));
+    assert!(!denied(&failure) && failure.to_string().contains("incomplete"));
     fs::write(
         nearer.join("config.json"),
         r#"{"workspace":"../../workspace.json","local":"../../local.json"}"#,
@@ -1666,11 +1778,8 @@ fn plugin_hooks_route_by_event_cwd_and_reject_a_broken_nearer_pointer() {
         settings.workspace.canonicalize().unwrap(),
         fixture.0.join("workspace.json").canonicalize().unwrap()
     );
-    assert!(denied(&checkpoint_command(
-        &fixture,
-        event,
-        &["plugin", "pre-edit"]
-    )));
+    let routed = checkpoint_command(&fixture, event, &["plugin", "pre-edit"]);
+    assert!(routed.to_string().contains("briefed earlier"));
 }
 
 #[cfg(unix)]

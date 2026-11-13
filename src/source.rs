@@ -451,21 +451,32 @@ fn aliases(root: &Path, warnings: &mut Vec<String>) -> Aliases {
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).map_err(|e| e.to_string()))
     {
         Ok(value) => {
-            if value.get("extends").is_some() || value.pointer("/compilerOptions/baseUrl").is_some()
-            {
+            if value.get("extends").is_some() {
                 warnings.push(format!(
-                    "{}: extends/baseUrl not resolved; aliases omitted",
+                    "{}: extends is not followed; only this file's baseUrl and paths are used",
                     path.display()
                 ));
-                return BTreeMap::new();
             }
-            match value.pointer("/compilerOptions/paths") {
+            let mut paths: Aliases = match value.pointer("/compilerOptions/paths") {
                 Some(paths) => serde_json::from_value(paths.clone()).unwrap_or_else(|_| {
                     warnings.push(format!("Invalid paths in {}", path.display()));
                     BTreeMap::new()
                 }),
                 None => BTreeMap::new(),
+            };
+            // Path targets are relative to baseUrl, which also resolves bare specifiers.
+            if let Some(base) = value
+                .pointer("/compilerOptions/baseUrl")
+                .and_then(|b| b.as_str())
+            {
+                for target in paths.values_mut().flatten() {
+                    *target = format!("{base}/{target}");
+                }
+                paths
+                    .entry("*".into())
+                    .or_insert_with(|| vec![format!("{base}/*")]);
             }
+            paths
         }
         Err(e) => {
             warnings.push(format!("Aliases unavailable for {}: {e}", path.display()));
@@ -642,9 +653,15 @@ pub(crate) fn index_sources(
     let mut parser = Parser::new();
     let mut index = BTreeMap::new();
     for (project, root) in roots {
+        // Without a src directory the whole project is scanned (minus excluded folders).
+        let subdir = if fs::symlink_metadata(root.join("src")).is_ok() {
+            "src"
+        } else {
+            ""
+        };
         for path in walk(
             root,
-            "src",
+            subdir,
             &["ts", "tsx", "js", "jsx", "mjs", "cjs"],
             warnings,
         ) {
@@ -934,7 +951,8 @@ pub fn trace(
             continue;
         }
         for link in &module.links {
-            if link.source != package {
+            let subpath = link.source.starts_with(&format!("{package}/"));
+            if link.source != package && !subpath {
                 continue;
             }
             for binding in &link.bindings {
@@ -947,7 +965,9 @@ pub fn trace(
                         imported_symbol: binding.imported.clone(),
                         location: location.clone(),
                         local_name: binding.local.clone(),
-                        kind: if binding.imported == "*" {
+                        kind: if subpath {
+                            "subpath_import_candidate"
+                        } else if binding.imported == "*" {
                             "namespace_or_star_candidate"
                         } else if binding.imported == symbol {
                             "named_import_or_reexport"
@@ -1012,9 +1032,9 @@ pub fn trace(
         omitted_warnings,
         limitations: vec![
             "Caller supplies the package-root source entry; build configuration and published/installed package identity are not verified.",
-            "Only error-free top-level JavaScript/TypeScript ESM statements under configured src directories are indexed. Files with parser errors retain a partial status; Go/GraphQL, CommonJS, dynamic imports and subpath package exports are not resolved.",
+            "Only error-free top-level JavaScript/TypeScript ESM statements are indexed, from each project's src directory or its root when there is none. Files with parser errors retain a partial status; Go/GraphQL, CommonJS and dynamic imports are not resolved. Subpath package imports are matched by imported name only; default imports from subpaths are not followed.",
             "Named imports/reexports are observed syntax; namespace/star references and downstream file dependencies are candidates, not resolved symbol usage or proven breakages.",
-            "Relative modules and simple tsconfig JSON paths are supported; JSONC, extends/baseUrl, conditional resolution and .js-to-.ts remapping are not supported.",
+            "Relative modules and tsconfig.json baseUrl/paths are supported; JSONC comments, extends, conditional resolution and .js-to-.ts remapping are not.",
             "Consumer imports of the selected symbol and one-hop public wrapper candidates are seeded. Wrapper candidates are exports co-located with a provider import of the selected symbol, not proven semantic dependencies. Deeper wrapper chains, type checking, shadowing and runtime execution are not analyzed.",
             "Scans at most 10000 directories/files per project, depth 20, and 1 MiB per file; downstream depth is capped at 8, reference/wrapper/downstream output at 100 each, and warnings at 50 with omitted counts unless --all-warnings is requested.",
             "Content-hashed parsed facts are cached; relationships are rebuilt each request. Scans are not an atomic snapshot. An empty result does not establish safety.",

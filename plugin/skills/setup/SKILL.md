@@ -13,4 +13,4 @@ The plugin searches the current directory and its ancestors for the nearest `.tr
 
 Restart the host/MCP connection after setup or changing the pointer. Codex requires review and trust of the bundled hook through `/hooks`; keep native tool permissions in place. Remove duplicate manual Traversiq MCP/hook registrations if the developer is replacing them with this plugin. Check the configured workspace through the Traversiq MCP tool before reporting setup complete.
 
-Until configuration exists, plugin hooks report that impact is unchecked and do not deny edits; the MCP server reports a setup error. Once configured, supported edits use the pre-edit checkpoint. Hook failures or unsupported writing tools can bypass that checkpoint. Setup does not prove that a change is safe.
+Until configuration exists, plugin hooks report that impact is unchecked and do not deny edits; the MCP server reports a setup error. Once configured, supported edits use the pre-edit checkpoint. Checkpoint errors are reported as unchecked edits rather than blocking. Hook failures or unsupported writing tools can bypass that checkpoint. Setup does not prove that a change is safe.

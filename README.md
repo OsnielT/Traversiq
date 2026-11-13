@@ -68,11 +68,11 @@ cargo run -- validate /path/to/workspace.json /path/to/local.json
 
 Once configured, Traversiq intercepts Codex `apply_patch` and Claude `Edit`/`Write` calls:
 
-1. The first attempt pauses the edit and returns an impact briefing.
+1. The first edit to a file pauses and returns an impact briefing.
 2. The agent reviews the evidence and investigates relevant warnings.
-3. An identical retry within 120 seconds can proceed if fresh analysis still matches, subject to normal host permissions.
+3. The retry, adjusted if the evidence calls for it, proceeds subject to normal host permissions. So do later edits in the same turn whose evidence is unchanged, for 120 seconds.
 
-Changed proposals or relevant evidence require a new briefing. Analysis has a five-second budget; handled errors and timeouts return a blocking, incomplete result. A retry gives the agent an opportunity to review—it does not prove understanding.
+Evidence is recomputed on every attempt; when it changes, the agent gets a new briefing. Analysis has a five-second budget. Errors and timeouts never block an edit: the agent is told the edit was not checked. Edits outside the configured projects pass with the same kind of note. A retry gives the agent an opportunity to review—it does not prove understanding.
 
 The automatic checkpoint covers project dependencies and partial JS/TS file relationships. API and Go investigation still uses the targeted analysis tools.
 
@@ -105,13 +105,13 @@ For a manual connection, use the [Codex MCP template](examples/codex-mcp.toml) o
 
 The MCP server exposes `traversiq_workspace`, `traversiq_impact`, `traversiq_trace` and `traversiq_api_trace`. Tool schemas describe their arguments. One analysis runs per server process; overlapping calls return a busy error, and cancellation does not forcibly stop a blocking parser.
 
-Source scans cover regular JS/TS files under configured `src` directories. They support relative ESM modules and simple JSON tsconfig aliases. API tracing matches selected schema fields to static gql templates, same-document fragments and named query imports; Go candidates use non-test method syntax. Dynamic/interpolated queries, schema aggregation and Go receiver types are not resolved.
+Source scans cover regular JS/TS files under each project's `src` directory, or the project root when there is none. They support relative ESM modules and `tsconfig.json` `baseUrl`/`paths`; `extends` and commented (JSONC) tsconfig files are not resolved. API tracing matches selected schema fields to static gql templates, same-document fragments and named query imports; Go candidates use non-test method syntax. Dynamic/interpolated queries, schema aggregation and Go receiver types are not resolved.
 
 Scans are bounded at 10,000 files/directories per project, depth 20 and 1 MiB per file. Result groups cap at 100 and warnings at 50; trace commands accept `--all-warnings`. Reports retain omitted counts and coverage limits.
 
 Trace commands write a content-hashed SQLite cache beside the local config. Reads are not an atomic filesystem snapshot. Locked, corrupt or unwritable caches fail clearly instead of returning old reports; close running scans before removing a disposable cache to rebuild it.
 
-Checkpoint receipts are single-use and scoped to the exact tool input, session, turn/prompt and agent ID when provided. Only one pending proposal is retained per local config. Unindexed files and API/Go content outside touched targets are outside the freshness check. New files receive project-level evidence only. Parent traversal and symlink edit paths are rejected. Claude must supply `prompt_id`; older hosts without it receive an incomplete result.
+Checkpoint receipts record that a briefing was delivered. They are keyed on the evidence, session, turn/prompt (when the host supplies one) and agent ID, stored beside the local config, and removed after 120 seconds. The edit's content is not part of the key: the briefing is file-level, so a different edit to the same file has the same evidence. Symlinks and `..` in edit paths are resolved before deciding which project owns the file. Unindexed files and API/Go content are outside the evidence. New files receive project-level evidence only.
 
 Use `python3 scripts/update-licenses.py --check` to check dependency notices and `python3 scripts/check-release.py` to inspect the public source-package file list. The release check is limited; it is not a comprehensive secret scan or legal audit.
 
